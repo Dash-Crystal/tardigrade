@@ -212,7 +212,8 @@ def load(filepath):
 
         fire = _expand_fire(_decode_fire_rle(data, *streams[7]), n)
         scope = _expand_events(_decode_events(data, *streams[8]), n)
-        health = _expand_events(_decode_events(data, *streams[9]), n, 100)
+        # stream 9 = weapon (skipped for now), stream 10 = health
+        health = _expand_events(_decode_events(data, *streams[10]), n, 100)
 
         for t in range(n):
             all_rows.append((
