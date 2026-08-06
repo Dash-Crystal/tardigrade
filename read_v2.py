@@ -104,22 +104,31 @@ def _decode_fire_rle(data, offset, length):
     return runs
 
 
-def _decode_string_events(data, offset, length):
-    pos = offset
-    n, pos = _read_varint(data, pos)
-    events = []
-    pt = 0
-    for _ in range(n):
-        dt, pos = _read_varint(data, pos)
-        tick = pt + dt
-        slen = data[pos]; pos += 1
-        s = data[pos:pos+slen].decode("utf-8", errors="replace"); pos += slen
-        events.append((tick, s))
-        pt = tick
-    return events
+# Maximum plausible per-axis displacement (world units) between two 16Hz
+# position samples. Physical CS movement stays near 16 units per interval;
+# larger jumps are respawns/round resets, and interpolating across them
+# fabricates positions the player never occupied (inside geometry).
+TELEPORT_UNITS_PER_INTERVAL = 64.0
 
 
-def _interpolate(reduced, n_full, rate):
+def _teleport_intervals(axes, max_step=TELEPORT_UNITS_PER_INTERVAL):
+    """Sample intervals where ANY axis jumps implausibly far.
+
+    Judged jointly across axes so a teleport holds the full 3D position;
+    per-axis decisions could interpolate one axis while holding another,
+    fabricating an L-shaped path through geometry.
+    """
+    count = max((len(a) for a in axes), default=0)
+    hold = set()
+    for i in range(count - 1):
+        for axis in axes:
+            if i + 1 < len(axis) and abs(axis[i+1] - axis[i]) > max_step:
+                hold.add(i)
+                break
+    return hold
+
+
+def _interpolate(reduced, n_full, rate, hold_intervals=frozenset()):
     if not reduced:
         return np.zeros(n_full)
     full = np.zeros(n_full)
@@ -130,6 +139,11 @@ def _interpolate(reduced, n_full, rate):
     for i in range(len(reduced) - 1):
         s = i * rate
         e = min((i+1) * rate, n_full)
+        if i in hold_intervals:
+            # Discontinuity (respawn/teleport): hold, don't fabricate a path.
+            for j in range(s+1, e):
+                full[j] = reduced[i]
+            continue
         for j in range(s+1, e):
             t = (j - s) / rate
             full[j] = reduced[i] + (reduced[i+1] - reduced[i]) * t
@@ -162,16 +176,19 @@ def load(filepath):
         tick, agent, team, skill, hp,
         x, y, z,
         heading, elevation (angular velocity per tick),
-        abs_yaw, abs_pitch (reconstructed absolute viewangle),
+        abs_yaw, abs_pitch (reconstructed absolute viewangle; unbounded
+            accumulator — abs_yaw_wrapped is the physical heading in
+            [-180, 180)),
         input_dx, input_dy (raw mouse),
-        fwd_move, left_move (WASD analog),
+        fwd_move, left_move (WASD; ternary -1/0/+1, no analog magnitude),
         action (fire), zoom,
         forward, back, left, right, reload, use_key (key states),
         ducking, walking, airborne,
         ammo, shots_fired, zoom_lvl,
         armor, flash, spotted,
         bomb_planted, defusing, freeze,
-        aim_punch
+        aim_punch,
+        weapon_idx, weapon, location_idx, location
     """
     filepath = Path(filepath)
     data = filepath.read_bytes()
@@ -185,7 +202,13 @@ def load(filepath):
 
     # Header
     magic = data[pos:pos+4]; pos += 4
-    assert magic == b"TR21", f"Not a v2.1 .tard file (magic: {magic})"
+    if magic == b"TARD":
+        raise ValueError(
+            f"{filepath.name} is a v1 pack (magic TARD); use read.load(), "
+            "not read_v2.load(). v1 and v2.1 share the .tard.zst extension; "
+            "dispatch on the magic bytes.")
+    if magic != b"TR21":
+        raise ValueError(f"Not a v2.1 .tard file (magic: {magic!r})")
     version = struct.unpack_from("<H", data, pos)[0]; pos += 2
     match_id = data[pos:pos+32].rstrip(b"\0").decode(); pos += 32
     map_name = data[pos:pos+32].rstrip(b"\0").decode(); pos += 32
@@ -227,29 +250,32 @@ def load(filepath):
         # Stream 0-3: mouse dx/dy, dyaw, dpitch (full rate)
         mdx = _decode_zz_stream(data, *streams[0])
         mdy = _decode_zz_stream(data, *streams[1])
-        dyaw = [v / 100.0 for v in _decode_zz_stream(data, *streams[2])]
-        dpitch = [v / 100.0 for v in _decode_zz_stream(data, *streams[3])]
+        dyaw_cd = _decode_zz_stream(data, *streams[2])
+        dpitch_cd = _decode_zz_stream(data, *streams[3])
+        dyaw = [v / 100.0 for v in dyaw_cd]
+        dpitch = [v / 100.0 for v in dpitch_cd]
         n = len(mdx)
 
         # Stream 4-5: forward_move, left_move (full rate)
         fwd_move = _decode_zz_stream(data, *streams[4])
         left_move = _decode_zz_stream(data, *streams[5])
 
-        # Stream 6-8: position (16Hz)
+        # Stream 6-8: position (16Hz). Teleports (respawn/round reset) are
+        # judged jointly across axes and held, not interpolated across.
         x_red = _decode_dod_stream(data, *streams[6], x_base)
         y_red = _decode_dod_stream(data, *streams[7], y_base)
         z_red = _decode_dod_stream(data, *streams[8], z_base)
-        x = _interpolate(x_red, n, 8)
-        y = _interpolate(y_red, n, 8)
-        z = _interpolate(z_red, n, 8)
+        hold = _teleport_intervals((x_red, y_red, z_red))
+        x = _interpolate(x_red, n, 8, hold)
+        y = _interpolate(y_red, n, 8, hold)
+        z = _interpolate(z_red, n, 8, hold)
 
         # Stream 9: fire (RLE)
         fire = _expand_fire(_decode_fire_rle(data, *streams[9]), n)
 
         # Stream 10-12: scope, weapon, health (events)
         scope = _expand_events(_decode_events(data, *streams[10]), n)
-        # stream 11 = weapon (skip for now)
-        _decode_events(data, *streams[11])
+        weapon_idx = _expand_events(_decode_events(data, *streams[11]), n)
         health = _expand_events(_decode_events(data, *streams[12]), n, 100)
 
         # Stream 13-18: FORWARD, BACK, LEFT, RIGHT, RELOAD, USE
@@ -280,18 +306,21 @@ def load(filepath):
         defusing = _expand_events(_decode_events(data, *streams[29]), n)
         freeze = _expand_events(_decode_events(data, *streams[30]), n)
 
-        # Stream 31: location (skip for now — string events)
-        try:
-            _decode_events(data, *streams[31])
-        except:
-            pass
+        # Stream 31: location (integer events indexing the location dictionary)
+        location_idx = _expand_events(_decode_events(data, *streams[31]), n)
 
         # Stream 32: aim_punch (event-encoded)
         aim_punch = _expand_events(_decode_events(data, *streams[32]), n)
 
-        # Reconstruct absolute viewangles from anchor + cumsum
-        abs_yaw = player["yaw0"] + np.cumsum(dyaw)
-        abs_pitch = player["pitch0"] + np.cumsum(dpitch)
+        # Reconstruct absolute viewangles from anchor + cumsum. Cumulate in
+        # integer centidegrees and divide once: float cumsum drifts. The
+        # accumulator is unbounded by construction (a player spinning in one
+        # direction passes 360); *_wrapped are the physical headings.
+        abs_yaw = player["yaw0"] + np.cumsum(
+            np.asarray(dyaw_cd, dtype=np.int64)) / 100.0
+        abs_pitch = player["pitch0"] + np.cumsum(
+            np.asarray(dpitch_cd, dtype=np.int64)) / 100.0
+        abs_yaw_wrapped = ((abs_yaw + 180.0) % 360.0) - 180.0
 
         for t in range(n):
             all_rows.append((
@@ -300,6 +329,7 @@ def load(filepath):
                 round(x[t], 1), round(y[t], 1), round(z[t], 1),
                 round(dyaw[t], 2), round(dpitch[t], 2),
                 round(float(abs_yaw[t]), 2), round(float(abs_pitch[t]), 2),
+                round(float(abs_yaw_wrapped[t]), 2),
                 mdx[t], mdy[t],
                 fwd_move[t] if t < len(fwd_move) else 0,
                 left_move[t] if t < len(left_move) else 0,
@@ -311,13 +341,17 @@ def load(filepath):
                 int(armor[t]), int(flash[t]), int(spotted[t]),
                 int(bomb[t]), int(defusing[t]), int(freeze[t]),
                 int(aim_punch[t]),
+                int(weapon_idx[t]),
+                weapons[weapon_idx[t]] if 0 <= weapon_idx[t] < len(weapons) else "",
+                int(location_idx[t]),
+                locations[location_idx[t]] if 0 <= location_idx[t] < len(locations) else "",
             ))
 
     df = pd.DataFrame(all_rows, columns=[
         "tick", "agent", "team", "skill", "hp",
         "x", "y", "z",
         "heading", "elevation",
-        "abs_yaw", "abs_pitch",
+        "abs_yaw", "abs_pitch", "abs_yaw_wrapped",
         "input_dx", "input_dy",
         "fwd_move", "left_move",
         "action", "zoom",
@@ -327,6 +361,7 @@ def load(filepath):
         "armor", "flash", "spotted",
         "bomb_planted", "defusing", "freeze",
         "aim_punch",
+        "weapon_idx", "weapon", "location_idx", "location",
     ])
     df.attrs["map_name"] = map_name
     df.attrs["match_id"] = match_id
@@ -359,7 +394,7 @@ def info(filepath):
     print(f"Duration:   {tick_count/128:.0f}s ({tick_count/128/60:.1f}min)")
     print(f"Size:       {compressed/1e6:.1f}MB" +
           (f" ({raw/1e6:.1f}MB decompressed)" if compressed != raw else ""))
-    print(f"Fields:     37 columns")
+    print(f"Fields:     42 columns")
     print(f"Hz:         128")
 
 
