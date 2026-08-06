@@ -109,6 +109,32 @@ defaults (e.g. `health = 100`), which is a guess, not data.
 **Fix:** producer should emit a t = 0 event for every state stream; readers
 should distinguish "no event yet" from a real value rather than defaulting.
 
+## D10 — the `map_name` header does not name the actual map
+
+Across all 155 packs the header declares exactly two values: `de_mirage`
+(128 packs) and `unknown` (27 packs) — yet the packs carry **31 distinct
+location-callout dictionaries**, i.e. many different maps.
+
+Direct falsification on `0.tard.zst` (declared `de_mirage`): its callout
+dictionary is Inferno's (Banana, Library, Ruins, Arch, TRamp, SecondMid, …;
+no Mirage-exclusive callout present), and projecting all 10,156 sample-
+aligned player positions through the official overview calibrations gives:
+
+- `de_inferno` (pos_x −2087, pos_y 3870, scale 4.9): **99.59%** of points on
+  drawn map area, 100% in bounds, zero fitted offset — trajectories trace
+  corridors exactly;
+- `de_mirage` (pos_x −3230, pos_y 1713, scale 5.0): 36% at zero offset, at
+  best 61% after fitting a translation, with points off the mapped world
+  entirely.
+
+Pack 0 is a de_inferno match labeled `de_mirage`. Any consumer keying
+geometry, navigation, or rendering off the header will use the wrong world.
+
+**Fix:** producer should write the real map name. Until re-published,
+consumers must infer the map from the location dictionary (the callout sets
+are map-unique) or by the projection test above; treat `map_name` as
+untrusted.
+
 ## D9 — v1 and v2.1 packs share an extension with no dispatch
 
 `.tard.zst` files with magic `TARD` (v1) and `TR21` (v2.1) coexist under the
