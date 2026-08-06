@@ -78,13 +78,21 @@ column (or wrap in the reader), and cumsum in integer centidegrees.
 
 **Fix:** correct the README (documentation defect only).
 
-## D6 — event streams outrun the full-rate horizon
+## D6 — event streams outrun the full-rate horizon (SEVERITY CORRECTED)
 
-Event streams may carry ticks beyond the player's full-rate sample count
-(one player: last event tick 11,080 vs 8,723 full-rate samples; 1,727
-stream-instances affected across 12 packs). Both the reference reader and
-any length-driven consumer silently drop these events, and nothing in the
-format states which horizon is authoritative.
+**This entry previously understated the problem by orders of magnitude**
+("1,727 stream-instances across 12 packs"). Measured across the entire
+published corpus (155 packs, 1,549 player-streams):
+
+- **1,529 of 1,549 streams (98.7%)** carry events past the player's
+  full-rate horizon — it is the norm, not an edge case;
+- overshoot median **29,712 ticks**, max **80,518 ticks (629 s)** of
+  events that every length-driven consumer silently discards;
+- mean per-player coverage of the declared `tick_count` is only
+  **0.708**, so the full-rate streams stop long before the match does.
+
+Both the reference reader and any consumer that sizes arrays by the
+full-rate length drop this data with no diagnostic.
 
 **Fix:** producer should either truncate event streams at the full-rate
 horizon or document that events past it are valid (and what they mean for a
@@ -101,9 +109,10 @@ remove it.
 
 ## D8 — no t = 0 state event
 
-State streams (health, weapon, armor, …) almost always emit their first
-event at tick 1 (32,798 of ~33k streams), but the gap reaches tick 65
-(~0.5 s of undefined state). `read_v2.py` masks this with hardcoded
+State streams (health, weapon, armor, …) usually emit their first event
+at tick 1 (median first-event tick = 1), but the worst gap is tick
+**5,419 — 42.3 seconds** of undefined state, not the ~0.5 s previously
+reported here. `read_v2.py` masks this with hardcoded
 defaults (e.g. `health = 100`), which is a guess, not data.
 
 **Fix:** producer should emit a t = 0 event for every state stream; readers
@@ -134,6 +143,41 @@ geometry, navigation, or rendering off the header will use the wrong world.
 consumers must infer the map from the location dictionary (the callout sets
 are map-unique) or by the projection test above; treat `map_name` as
 untrusted.
+
+## D11 — `aim_punch` is a dead field, present but never populated
+
+Stream 32 (`aim_punch`) exists in every player record and is **always
+zero**. Measured over 399 player-streams from 40 packs: exactly **399
+aim-punch events — precisely one per stream — and zero of them non-zero**.
+Identical on both published revisions (030f7ca and ea7bcf2).
+
+This matters because README documents the field as load-bearing:
+`crosshair_position = abs_yaw + aim_punch`. A consumer following that
+formula silently computes an un-recoiled crosshair. The producer appears
+to emit a single default-valued event per stream and never update it.
+
+**Fix:** populate it from the source demo's recoil/punch property, or
+remove the stream and the README formula. Either is fine; shipping a
+documented field that is structurally always-default is not.
+
+## D12 — the `fire` RLE is not consistent with `shots_fired`
+
+Stream 9 (`fire`, run-length encoded) does not agree with the
+`shots_fired` counter it should correlate with. Measured over the same
+399 streams:
+
+- **19.4% of all player-ticks** are inside a "firing" run;
+- the longest single run is **8,248 ticks — 64 seconds of continuous
+  fire**, which no CS2 weapon can produce;
+- only **68.0%** of `shots_fired` increments occur inside a fire run;
+  the other 32% of shots happen while the stream says fire is inactive.
+
+Whatever stream 9 encodes, it is not trigger-held state. Consumers using
+it for muzzle flash, tracers or trigger-discipline features will be wrong
+about a third of the time and will render 64-second continuous fire.
+
+**Fix:** document what the stream actually is, or re-derive it from the
+demo's weapon_fire events (which are per-shot and unambiguous).
 
 ## D9 — v1 and v2.1 packs share an extension with no dispatch
 
