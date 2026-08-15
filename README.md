@@ -106,3 +106,37 @@ print(df.attrs["match_id"])
 
 - **v2.1**: 37 columns, viewangle anchors, WASD inputs, aim punch, game state, location callouts, map name. 6.7 B/row.
 - **v1**: 14 columns, no anchors, no keyboard, no game state. 4.6 B/row.
+
+## CS2 renderer (src/ + scripts/)
+
+Upstreamed 2026-08-14 from the iji-arm-port working repo (source commit
+recorded in the upstream commit message). Layout:
+
+- `src/counter_strike_render/` — the renderer: 23-line `gpu_render.py`
+  loader executing `stages/` in ORDER in one shared scope; `render_config.py`
+  (preset vectors READ from `docs/projects/counter-strike-sft/
+  GT_QUALITY_LEVEL_MANIFEST.json`); `packtools/` — data preparation and
+  extraction CLIs (datapack dump/reader, model/viewmodel/world extraction,
+  forklift-phase authoring), each directly runnable.
+- `src/gpu_render_libs/` — camera/adapter libraries: associative-scan
+  camera controllers, frustum camera solver (9-ray near-plane, src-space
+  occupancy), AC-PSX lock-on adapter (tick_rate is a REQUIRED derived
+  parameter), vector HUD, demo camera/timeline export.
+- `src/tardigrade_v21.py`, `src/map_identity.py`,
+  `src/compatibility_identity.py` — the packaged v22 decoder (frame-perfect
+  positions, D1 teleport-hold) and trajectory-fit map identity with refusal
+  (the recording's map_name header is a comment, not an identifier — D10;
+  the tick rate is DERIVED from the movement plateau, the dataset name's
+  128 Hz is wrong, it is 64).
+- `scripts/` — `cs_match_three_view_videos.py` (stage/gen/render/eval/pull
+  pipeline: 10 players × ego/gow/sm64/ac from one recording),
+  `provision_render_node.py` (a render node gets the WHOLE content tree,
+  verified by count+bytes; the renderer resolves every input family from
+  `--content-root` by fitted map name and REFUSES BY NAME on gaps — no
+  waiver exists), REST render server/client/service.
+
+Run: `python src/counter_strike_render/gpu_render.py --content-root
+CONTENT --map <fitted> ...` (see --help; 1,700+ documented options).
+Deps: torch, nvdiffrast (GPU), imageio_ffmpeg, numpy. Content trees are
+built by `provision_render_node.py` from the derived-artifact corpus and
+the raw gt_datapack; no game assets are included in this repository.
