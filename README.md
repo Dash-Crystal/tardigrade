@@ -140,3 +140,25 @@ CONTENT --map <fitted> ...` (see --help; 1,700+ documented options).
 Deps: torch, nvdiffrast (GPU), imageio_ffmpeg, numpy. Content trees are
 built by `provision_render_node.py` from the derived-artifact corpus and
 the raw gt_datapack; no game assets are included in this repository.
+
+### Replay-state capture contract
+
+The renderer's fidelity is bounded by the state and source material the
+recording preserves. See
+[`STATE_RECONSTRUCTION_CAPTURE_CONTRACT.md`](docs/projects/counter-strike-sft/STATE_RECONSTRUCTION_CAPTURE_CONTRACT.md)
+for the required raw-demo/build/content provenance, generic entity and physics
+journal, animation or evaluated-pose capture, checkpoint/delta protocol, and
+acceptance gates. TARD 2.1 does not currently satisfy the authoritative
+world-pose or original-client-presentation levels defined there.
+
+### State/action replay dyad
+
+[`STATE_ACTION_REPLAY_DYAD.md`](docs/projects/counter-strike-sft/STATE_ACTION_REPLAY_DYAD.md)
+defines and inventories the forward demonstrator: a polite passive ego-input
+sidecar plus native demo, persistent hash-chained state-integrator service,
+strict state-to-render bridge, repaired headless render service, explicit
+legacy-render gap manifests, and reproducible performance/quality gates. The
+state engine, bridge, capture tool and service repairs are implemented; the
+native-demo normalizer, runnable client capture, evaluated-bone/physics draw
+consumers and real GPU benchmark remain explicit gates rather than implied
+features.

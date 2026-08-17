@@ -1,0 +1,65 @@
+{
+  "app_id": "730",
+  "beta_key": "csgo_legacy",
+  "build_id": "12426195",
+  "sdk_references": {
+    "alliedmodders_hl2sdk_csgo": {
+      "commit": "9cf2f325ea273559c7cae27b4f98518c18b8e322",
+      "path": "/Users/mdot/dox/runs/hl2sdk-csgo-reference"
+    },
+    "valve_source_sdk_2013": {
+      "commit": "22288b919617be6c8ca3cefd7cca979cbb39a88c",
+      "path": "/Users/mdot/dox/runs/source-sdk-2013-reference"
+    }
+  },
+  "modules": {
+    "client": {
+      "relative_path": "csgo/bin/osx64/client.dylib",
+      "sha256": "3623246285d7411429e04222e53f26e9d31b4616707e0bd447445cef22e03872",
+      "size": 23882924,
+      "uuid": "2F21BA44-6AF3-3E30-A31D-B29F1359064D"
+    },
+    "engine": {
+      "relative_path": "bin/osx64/engine.dylib",
+      "sha256": "1b0ac82e0e95b87d9f5c58550757df53a285bfac9a393a3545a936414038f9e6",
+      "size": 8351304,
+      "uuid": "4BCE2333-36CB-32E1-9B39-92029B09F627"
+    },
+    "executable": {
+      "relative_path": "csgo_osx64",
+      "sha256": "6a42c62aca022b8f66a45ef826d6b33b199a54c7de20f50f9cc4aa22726aae3b",
+      "size": 9276,
+      "uuid": "53E7FB70-3075-380E-8BE3-5677E1A298E4"
+    },
+    "server": {
+      "relative_path": "csgo/bin/osx64/server.dylib",
+      "sha256": "8642ea4a18abae3bc2c2af5929bfb7499b11449b71680a58ec0b9edce0e077c2",
+      "size": 17944404,
+      "uuid": "61160BED-566C-34EA-A633-F9975320B911"
+    },
+    "studiorender": {
+      "relative_path": "bin/osx64/studiorender.dylib",
+      "sha256": "c234269052f8653f4aac67ffea39c2cb2a13ad1850969ee1a6134c0beee803fa"
+    },
+    "vphysics": {
+      "relative_path": "bin/osx64/vphysics.dylib",
+      "sha256": "0e63a7e033b33d7aebb5aaf9cf5eef745a3800887220596af4efa98d5fde3164",
+      "size": 1238320,
+      "uuid": "9A305661-D4F6-34EE-8DC4-A46D5EEF757E"
+    }
+  },
+  "required_interface_strings": {
+    "client": ["VClient018", "VClientEntityList003"],
+    "engine": ["VEngineClient014", "VEngineModel016", "VEngineRenderView014"],
+    "server": ["BotManager001", "PlayerInfoManager002", "ServerGameClients004", "ServerGameDLL005", "VSERVERTOOLS001"],
+    "studiorender": ["VStudioRender026"],
+    "vphysics": ["VPhysics031"]
+  },
+  "abi_code_anchors": {
+    "client_create_move": {"module": "client", "file_offset": 1311488, "length": 32, "sha256": "85357dcbcc6e4a0fedf751ae0dda6b3883846a3e829dfa2507055b3f53006b3f"},
+    "client_render_view": {"module": "client", "file_offset": 1326672, "length": 32, "sha256": "ab03c7dc87814d059a9b8a75a927d5c20a80ef5e6d786a94c47b34c269abfc29"},
+    "input_get_user_cmd": {"module": "client", "file_offset": 2116704, "length": 32, "sha256": "13e962f7eef9b1ad9e0eef036f129ca75b197ddedbc96117465b0ad9625a044c"},
+    "render_get_matrices": {"module": "engine", "file_offset": 300256, "length": 32, "sha256": "ab9d8f6e8b3a4b2fcf6746c73fc79d08a929f9037a36dd9add4a7a8e07a507a6"},
+    "engine_client_command": {"module": "engine", "file_offset": 520320, "length": 32, "sha256": "8820bffbc65205a0cba3b9ff7ed1eb02bd857a2a69c22ff94da1efb2527d9d18"}
+  }
+}
