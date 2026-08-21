@@ -68,6 +68,115 @@ The decompressed probe copy and installed audit environment live outside the
 source tree under `/Users/mdot/dox/runs/cs2-raw-log-audit/` and
 `/Users/mdot/dox/runs/cs-tard21-venv/`.
 
+## 2026-08-20 upstream `966-field` archive follow-up
+
+Upstream commit `6d3d851` added
+`data/cs2_966field_10demos.tar.zst` through Git LFS. This is a 133-byte LFS
+pointer in Git to an object declaring:
+
+```text
+oid sha256:9b103ce1f72a3ec79e7ca07f00db1e331b22b364228ceca953ed6ef8cee92eec
+size 598122496
+```
+
+The downloaded object exactly matches that size and SHA-256. It is not,
+however, a valid complete tar archive. Decompression and tar traversal end
+inside
+`parsed_max/1-1eb55c60-c801-48b8-ba77-38d92ef47bca.dem/ticks.parquet`.
+That file has no Parquet footer. The archive contains eight complete demo
+directories, the beginning of a ninth, and no tenth directory. Thus all
+three published descriptions disagree with the bytes:
+
+- the filename says ten demos;
+- the commit title says nine demos; and
+- only eight demos have a readable `ticks.parquet` plus manifest and sibling
+  tables.
+
+The archive was audited outside the checkout under
+`/Users/mdot/dox/runs/cs2-966field-audit`. The eight readable tick tables
+contain 11,069,790 player-tick rows. They have 751 columns in common and 753
+columns in union; `Weapon.m_fFireTime` and `Weapon.m_bMagazineRemoved` account
+for the per-demo schema variation. The manifests themselves report 751 or
+752 columns, not 966.
+
+For the raw demo already audited above, a current direct parser probe reports
+967 updated qualified properties. Exact-name comparison with its archived
+Parquet finds only 673 of those properties. The 294 absent qualified names
+break down as 225 grenade, 33 player-pawn, 27 player-controller, six rules,
+two weapon and one team property. Some non-grenade omissions have a normalized
+alias in the 78 unqualified convenience columns, but this does not explain
+the missing grenade surface. The archive is a wide high-level player table,
+not “every entity property” and not a schema-generic entity journal.
+
+The eight manifests contain 204,602 events. Individual demos have 46 through
+50 nonempty event families; their union is 51. This materially repairs the
+earlier 12/13-family event derivatives. The event rows still have no ordered
+join to entity transactions or state hashes.
+
+The eight grenade tables contain 13,235,137 rows, but only 1,775,312 rows
+(13.4%) have numeric positions. A million rows is not a million trajectory
+samples when 86.6% of the coordinates are null and no state classification
+separates held, dormant, destroyed and flying entities.
+
+### Serialization fidelity defects in the wide tables
+
+The wide tables preserve many useful values exactly. Positions, view angles,
+qualified FOV, the scalar pose-recipe carrier and the server serialization
+context matched a fresh parse of the same raw demo row for row. Other surfaces
+do not:
+
+- `usercmd_viewangle_x`, `usercmd_viewangle_y`, action bits such as `FIRE`,
+  and most other command fields are absent;
+- archived `usercmd_mouse_dx` has 30 distinct values in `[-26,116]`, while a
+  fresh parse has 428 in `[-879,937]`;
+- archived `usercmd_mouse_dy` has eight distinct values in `[-3,5]`, while a
+  fresh parse has 200 in `[-167,122]`;
+- among the 975,558 rows where both parses have a mouse value, 454,378 `dx`
+  values and 291,439 `dy` values disagree; the archive additionally fills
+  85,812 rows that the fresh parser leaves null; and
+- the manifest records neither parser package/version nor requested and
+  returned field lists, so parser-version behavior cannot be distinguished
+  from all-fields-request corruption.
+
+Several vector-valued properties are serialized as `large_string` rather
+than typed arrays. The pose-recipe topology contains Unicode replacement
+characters, demonstrating that opaque/binary bytes passed through a lossy
+text conversion. `m_SerializePoseRecipeAG2Dynamic` is stored as a scalar
+`uint32` with values 0 through 255, not a documented recipe byte buffer.
+
+The 751-column schema has useful animation inputs, 32 fields mentioning basic
+physics/collision/velocity, and 34 camera/view properties. It has:
+
+- zero final bone-matrix or skeleton-transform columns;
+- zero constraint, contact, manifold, inertia, mass or solver-state columns;
+- zero view/projection matrix columns;
+- zero particle or smoke-volume/grid columns;
+- only `m_iHideHUD` resembling UI state and no Panorama/layout/draw-list
+  state; and
+- no temporal color/depth/motion/exposure/TAA render-history buffers.
+
+The manifests contain map names and row/event counts, but no source-demo hash,
+build/content identity, parser identity, schema hash, table hashes, lifecycle
+coverage, state hash or closure proof. `players.json` and skins are useful
+side tables but do not close those gaps. The many tiny files named `.opus`
+are packet payloads, not demonstrated standalone Ogg/Opus streams.
+
+### Repository and publication consequence
+
+This 598 MB LFS payload should not be the canonical corpus distribution. A
+normal LFS-enabled pull can materialize it inside the source checkout, contrary
+to the repository's artifact-root policy, and the published object is
+truncated. Publish a new content-addressed archive as a release/object-store
+artifact with an external checksum and immutable manifest. Keep only the
+manifest, schema, verifier and retrieval instructions in Git. Do not replace
+the existing LFS object under the same semantic name: retain its hash as a
+known-bad artifact and give the repaired archive a new identity.
+
+The eight valid tables are still worth preserving as a broad derivative and
+parser-regression corpus. They do not change the reconstruction conclusion:
+retain the raw demos, reparse them with returned-field validation, and add
+engine-side capture for state never present in a SourceTV demo.
+
 ## What is actually in the lean JSON
 
 Twelve stable files spread across the received numeric range were streamed in
