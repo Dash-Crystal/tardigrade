@@ -113,10 +113,16 @@ The eight manifests contain 204,602 events. Individual demos have 46 through
 earlier 12/13-family event derivatives. The event rows still have no ordered
 join to entity transactions or state hashes.
 
-The eight grenade tables contain 13,235,137 rows, but only 1,775,312 rows
-(13.4%) have numeric positions. A million rows is not a million trajectory
-samples when 86.6% of the coordinates are null and no state classification
-separates held, dormant, destroyed and flying entities.
+The eight grenade tables contain 13,235,137 rows, of which 1,775,312 (13.4%)
+have numeric positions. This is not random missing trajectory data. Across all
+eight tables, coordinate presence agrees perfectly with the recorded entity
+class: every row whose class name ends in `Projectile` has all three
+coordinates, every non-projectile grenade-weapon row has none, and no row has
+a partial coordinate tuple. The null rows are coherent carried/inventory
+grenade state, not failed projectile samples. It remains inaccurate to call
+all 13.2 million rows “trajectory samples”; most are repeated inventory-state
+snapshots. Rendering a carried grenade also requires its attachment/final-bone
+transform, which class and owner identity alone do not supply.
 
 ### Serialization fidelity defects in the wide tables
 
@@ -238,10 +244,15 @@ is 0 through 255, not a documented byte buffer. Solo parsing makes this table
 a faithful serialization of the current parser's returned values; it does not
 make the parser's lossy string conversion byte-preserving.
 
-The grenade table is unchanged in the dimension relevant to trajectory
-claims: only 212,328 of 1,280,564 rows (16.6%) have all three numeric position
-coordinates. The other rows are not labelled with sufficient lifecycle/state
-semantics to call the whole table 1.28 million trajectory samples.
+The grenade table makes a useful literal state-machine distinction: exactly
+212,328 of 1,280,564 rows (16.6%) are projectile-class rows, and exactly those
+rows have all three coordinates. Every one of the 1,068,236 base
+grenade-weapon rows has null coordinates, consistent with a grenade carried in
+a player's inventory rather than an independently positioned projectile; no
+row has a partial tuple. Those rows are meaningful inventory-state snapshots,
+not corrupt trajectories. They still cannot all be described as “trajectory
+samples,” and owner/class state does not reconstruct the held model's exact
+attachment pose for rendering.
 
 The replacement manifest records method, map and aggregate counts, but still
 does not record the raw demo hash, parser package/version, requested and
@@ -373,10 +384,12 @@ build, graph resources, animation assets, evaluation clock and all local
 inputs, but those dependencies are not sealed by this corpus. A serialized
 recipe is not itself evidence of the final evaluated pose.
 
-`parse_grenades()` produced 1,280,564 rows, but only 212,328 rows (16.6%) had
-numeric `x/y/z`. The null rows may include held or otherwise non-flight
-entities; the export does not carry a state classification that makes that
-distinction reconstructible.
+`parse_grenades()` produced 1,280,564 rows. Its `grenade_type` classification
+fully explains coordinate presence: all 212,328 projectile rows have numeric
+`x/y/z`, while all 1,068,236 base grenade-weapon rows have null coordinates.
+The latter are carried/inventory state, not missing projectile positions. The
+table preserves owner and class but not the final bone/attachment transform
+needed to place a visibly held grenade exactly.
 
 ## Recovery sufficiency
 
