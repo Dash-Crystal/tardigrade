@@ -177,6 +177,95 @@ parser-regression corpus. They do not change the reconstruction conclusion:
 retain the raw demos, reparse them with returned-field validation, and add
 engine-side capture for state never present in a SourceTV demo.
 
+## 2026-08-21 upstream replacement follow-up
+
+Upstream subsequently removed the corrupt batch in commit `862c1c4` and then
+replaced its interim solo parse in commit `e11226b` with
+`data/cs2_complete_capture_1demo.tar.zst`. This is a new LFS object, not a
+relabelling of the known-bad bytes:
+
+```text
+oid sha256:3c9c32d2f6f79175e78a82bb83f2cf66068d309b7893beb6e36e1ad13ad50c15
+size 65997063
+```
+
+The downloaded object matches that identity. Zstandard decompression and a
+complete tar traversal succeed. Its sole demo is the representative
+`1-0e10f025-793a-46a3-9d70-177c230f557f` already audited above. Excluding the
+voice packet directory, all four Parquet files open cleanly:
+
+| Table | Rows | Columns |
+|---|---:|---:|
+| `ticks.parquet` | 1,061,380 | 961 |
+| `events.parquet` | 22,219 | 86 |
+| `grenades.parquet` | 1,280,564 | 8 |
+| `skins.parquet` | 19 | 7 |
+
+This replacement does fix the earlier cross-field parse contamination. A
+fresh `demoparser2 0.42.0` parse of each field in isolation matched archived
+row keys, null placement and values exactly for mouse X/Y, `FIRE`, the scalar
+pose-recipe carrier, the server serialization-context iteration and recipe
+topology. In particular, the mouse domains are now the direct-parser domains:
+428 X values in `[-879,937]` and 200 Y values in `[-167,122]`, with 975,558
+non-null rows. The earlier corrupted ranges and hundreds of thousands of
+value disagreements are repaired.
+
+The new title and manifest still overstate coverage. The table has two key
+columns and 959 data columns. Those data columns comprise only 896 exact names
+from the current parser's 967 updated-property list plus 63 unqualified
+convenience fields. Seventy-one updated qualified properties remain absent:
+59 grenade, ten player-pawn, one weapon and one player-controller property.
+Notable omissions include smoke voxel/frame data, inferno positions and
+parent positions, smoke and explosion origins, initial grenade position and
+velocity, player weapons/ammunition arrays, body-group choices and secondary
+skeleton slot IDs. Calling all 959 data columns “entity fields” hides this
+alias substitution and the missing schema surface.
+
+Applied command coverage also remains incomplete even though the repaired
+mouse columns and five decoded action flags are useful. The current parser can
+recover, from these same demo bytes, command view-angle X/Y/Z, forward and
+left movement, and three command button-state words. Those fields have
+975,558 or 958,940 non-null player-tick rows, respectively, but none is in the
+replacement table. Therefore these are still serializer omissions, not
+original-log omissions.
+
+“Byte-level capture” is not an accurate description of the Parquet. Its tick
+schema contains no binary column. Recipe topology is `large_string`; every
+one of the first 100,000 sampled values contains Unicode replacement
+characters, so arbitrary source bytes cannot be recovered. The
+`m_SerializePoseRecipeAG2Dynamic` column remains a scalar `uint32` whose domain
+is 0 through 255, not a documented byte buffer. Solo parsing makes this table
+a faithful serialization of the current parser's returned values; it does not
+make the parser's lossy string conversion byte-preserving.
+
+The grenade table is unchanged in the dimension relevant to trajectory
+claims: only 212,328 of 1,280,564 rows (16.6%) have all three numeric position
+coordinates. The other rows are not labelled with sufficient lifecycle/state
+semantics to call the whole table 1.28 million trajectory samples.
+
+The replacement manifest records method, map and aggregate counts, but still
+does not record the raw demo hash, parser package/version, requested and
+returned field lists, schema/table hashes, exact executable or content
+identity, lifecycle coverage, state hashes or closure evidence. The commit's
+archive checksum is useful transport integrity but is not inside a sealed
+capture manifest. The advertised event artifact is Parquet, not the earlier
+quoted `events.jsonl` form.
+
+Most importantly, the replacement does not add the state surfaces needed for
+visual recurrence. Keyword and type inspection still finds no final bone
+matrix palette, physics contacts/constraints/manifolds/solver state, final
+view/projection matrices, particle or smoke-volume state, Panorama/layout/draw
+state, or temporal color/depth/motion/exposure/TAA/HZB buffers. Three fields
+mention interpolation-history initialization, but no history buffers are
+present. This is a repaired and substantially wider one-demo derivative, not
+a total-state or total-visual-state log.
+
+The current replacement was independently audited outside the checkout under
+`/Users/mdot/dox/runs/cs2-complete-capture-audit`. The repository-distribution
+recommendation remains: publish large capture bytes through a content-addressed
+artifact store or release, and keep their sealed manifest, schema and verifier
+in Git.
+
 ## What is actually in the lean JSON
 
 Twelve stable files spread across the received numeric range were streamed in
