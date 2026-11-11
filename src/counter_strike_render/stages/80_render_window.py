@@ -472,6 +472,13 @@ def render_window(mvp, eye, fwd, tsec=None):
                     # tint is gated by the SAME mask, and nothing implemented
                     # it before.
                     rgb_o = gt_vertex_color_tint(rgb_o, vc_o, tmv, e_o)
+                # Vertex color modulation: CS2 multiplies vertex color RGB
+                # into albedo for lightmapped surfaces. This gives the warm
+                # sandy tint to Dust2 ground and wall color variation.
+                if vc_o is not None and vc_o.shape[-1] >= 3:
+                    _vc_rgb = vc_o[..., :3].clamp(0, 1)
+                    _vc_nonzero = (_vc_rgb.sum(-1) > 0.01).unsqueeze(-1).float()
+                    rgb_o = rgb_o * (_vc_rgb * _vc_nonzero + (1.0 - _vc_nonzero))
                 if args.overlay:
                     # The overlay has its own coordinate stream and its own
                     # transform (csgo_environment_blend_vs_max.glsl:441-455,

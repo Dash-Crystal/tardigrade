@@ -16,7 +16,7 @@ if FAMILY:
     _fs = _fam_side_load()
     FAM_NAMES = list(_fs["fam_names"])
     MAT_FAM = _fs["fam_id"].to(device).long()
-    MAT_EXT2 = _fs["ext2"].to(device)
+    MAT_EXT2 = _fs["ext2"].to(device).half()  # float16 to save VRAM on per-pixel expansion
     EXT2 = {k: i for i, k in enumerate(_fs["ext2_keys"])}
     # --- DIAGNOSTIC: zero one named ext2 column ------------------------
     # A bisect over these columns is only interpretable if "off" has one

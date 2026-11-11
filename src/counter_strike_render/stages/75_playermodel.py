@@ -52,13 +52,24 @@ def playermodel_pass(mvp, eye, world_rgb, world_zfc):
         for e in per_frame[i]:
             if e.get("_ev") is None:
                 continue
-            _bl = e["_clip"].get("blocks") or []
+            if e.get("_hv_bones") is not None:
+                frame_print(
+                    f"PLAYERMODEL ANIM f{b0 + i:06d} "
+                    f"{e.get('team')}#{e.get('steamid')} "
+                    f"HV_GROUND_TRUTH {len(e['_hv_bones'])} bones"
+                    f" | {e['_why'][0]}",
+                    flush=True)
+                continue
+            _bl = e["_clip"].get("blocks") or [] if e.get("_clip") else []
+            _cn = os.path.basename(e["_clip"]["clip"]) if e.get("_clip") else "none"
+            _dur = e["_clip"]["duration"] if e.get("_clip") else 0
+            _fr = e["_clip"]["frames"] if e.get("_clip") else 0
             frame_print(
                 f"PLAYERMODEL ANIM f{b0 + i:06d} "
                 f"{e.get('team')}#{e.get('steamid')} event={e['_ev']} "
-                f"clip={os.path.basename(e['_clip']['clip'])} "
-                f"t={e['_t']:.3f}s of {e['_clip']['duration']:.3f}s "
-                f"({e['_clip']['frames']} frames, {len(_bl)} block(s)"
+                f"clip={_cn} "
+                f"t={e['_t']:.3f}s of {_dur:.3f}s "
+                f"({_fr} frames, {len(_bl)} block(s)"
                 + (", STATIC" if e.get("_static") else ", animated")
                 + f") | {e['_why'][0]}"
                 + (f" | {e['_why'][-1]}" if len(e["_why"]) > 1 else ""),
@@ -278,6 +289,10 @@ def playermodel_pass(mvp, eye, world_rgb, world_zfc):
                   f"rifle therefore recoils and does not cycle. That is a "
                   f"tier, not the claim that the weapon is animated.",
                   flush=True)
+    if PM_EVENT_COUNT and "playermodel" not in ANIM_DRIVEN:
+        ANIM_DRIVEN["playermodel"] = ",".join(
+            f"{k}:{v}" for k, v in sorted(PM_EVENT_COUNT.items(),
+                                          key=lambda kv: -kv[1]))
     if float(acc_a.sum()) == 0.0:
         for i in range(B):
             frame_print(f"PLAYERMODELS f{b0 + i:06d} tick {ticks[i]} ABSENT: "
@@ -337,9 +352,11 @@ def playermodel_pass(mvp, eye, world_rgb, world_zfc):
             f"({e['x']:.1f},{e['y']:.1f},{e['z']:.1f}) yaw {e['yaw']:.1f} "
             f"agent={e.get('agent') or 'NONE'} drew={e.get('_bundle')}.pt "
             f"[{e.get('_bundle_how')}] "
-            + (f"{e['_ev']}@{e['_t']:.2f}s "
+            + (f"HV_BONES({len(e['_hv_bones'])}b) "
+               if e.get("_hv_bones")
+               else f"{e['_ev']}@{e['_t']:.2f}s "
                f"{os.path.basename(e['_clip']['clip'])} "
-               if e.get("_ev") else "pose BIND ")
+               if e.get("_ev") and e.get("_clip") else "pose BIND ")
             + f"{ent_px[i].get(j, 0)}px "
             # HOLDING WHAT, per entity. An ally rendered empty-handed is
             # the owner-visible failure this closes, so the weapon gets

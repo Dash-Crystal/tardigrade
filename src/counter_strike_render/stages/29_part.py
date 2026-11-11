@@ -1,5 +1,157 @@
 
 
+# ── HYPERVISOR GROUND-TRUTH BONE CAPTURE ─────────────────────────────
+# When --hv-capture is given, this loader provides per-tick world-space
+# bone transforms read directly from CS2 via the hypervisor. These
+# replace the clip scripter for pose selection entirely.
+HV_BONES = {}       # tick(approx) → [{pos:[x,y,z], bones:[[px,py,pz,qx,qy,qz,qw,s],...]}]
+HV_TICKS = []       # sorted tick list for nearest-match
+HV_BONE_NAMES = []  # worldmodel skeleton bone names (from agents.clips.pt)
+HV_NOTE = []
+if args.hv_capture and os.path.exists(args.hv_capture):
+    import bisect as _bisect
+    _hv_data = []
+    with open(args.hv_capture) as _fh:
+        for _line in _fh:
+            _hv_data.append(json.loads(_line))
+    # Index HV frames by a pseudo-tick derived from frame sequence.
+    # The HV capture runs at ~1 Hz while the demo is 64 tick/sec.
+    # We assign each HV frame a tick range and match by position proximity.
+    # Store as frame-index → player list for position matching.
+    HV_FRAMES = _hv_data
+    print(f"hv-capture: loaded {len(_hv_data)} frames from {args.hv_capture}, "
+          f"{sum(f['np'] for f in _hv_data)} total player snapshots", flush=True)
+    # Load worldmodel bone names for the palette join
+    if args.playermodel_clips:
+        _cs_path = args.playermodel_clips
+    elif args.playermodel_bundles:
+        _cs_path = os.path.join(args.playermodel_bundles, "agents.clips.pt")
+    else:
+        _cs_path = None
+    if _cs_path and os.path.exists(_cs_path):
+        _csd = torch.load(_cs_path, map_location="cpu", weights_only=False)
+        _first_clip = next(iter(_csd["events"].values()))[0]
+        _blk = _first_clip["blocks"][0]
+        HV_BONE_NAMES = list(_blk["bone_ids"])
+        print(f"hv-capture: worldmodel skeleton has {len(HV_BONE_NAMES)} bones",
+              flush=True)
+else:
+    HV_FRAMES = []
+
+
+def _hv_match_entity(hv_frame, demo_entity):
+    """Find the HV player closest to this demo entity's position."""
+    ex, ey, ez = float(demo_entity["x"]), float(demo_entity["y"]), float(demo_entity["z"])
+    best, best_d = None, float("inf")
+    for p in hv_frame.get("p", []):
+        hx, hy, hz = p["pos"]
+        d = (hx - ex)**2 + (hy - ey)**2 + (hz - ez)**2
+        if d < best_d:
+            best_d = d
+            best = p
+    return best if best_d < 200**2 else None  # within 200 units
+
+
+def _hv_frame_for_tick(tick):
+    """Find the HV capture frame nearest to this demo tick.
+
+    The HV capture runs at ~1 Hz while the demo runs at 64 tick/sec.
+    We distribute the HV frames evenly across the demo's tick range
+    and pick the nearest one.
+    """
+    if not HV_FRAMES:
+        return None
+    # Map demo ticks to HV frame indices using the camera tick range
+    # The simplest approach: use the HV frame index as a coarse time proxy
+    # and match entities by position, not by tick.
+    # We cycle through HV frames based on the demo tick.
+    tick_range = TICK_OF_FRAME  # {frame_idx: tick}
+    if not tick_range:
+        return HV_FRAMES[0] if HV_FRAMES else None
+    all_ticks = sorted(tick_range.values())
+    if not all_ticks:
+        return HV_FRAMES[0]
+    t0, t1 = all_ticks[0], all_ticks[-1]
+    span = max(t1 - t0, 1)
+    frac = max(0.0, min(1.0, (tick - t0) / span))
+    idx = min(int(frac * len(HV_FRAMES)), len(HV_FRAMES) - 1)
+    return HV_FRAMES[idx]
+
+
+def pm_pose_arrays_hv(name, b, hv_bones_raw, entity_pos, entity_yaw):
+    """Produce (pos, nrm, tan) from HV ground-truth world-space bones.
+
+    hv_bones_raw: list of [px,py,pz,qx,qy,qz,qw,scale] per bone,
+                  in Source world space, ABSOLUTE (already world-positioned).
+
+    The skin pipeline needs bone transforms in model space (relative to the
+    entity origin), so we undo the entity's world position and yaw to get
+    model-space transforms, then run bone_transforms + lbs as usual.
+    """
+    skin = b.get("skin")
+    if skin is None or not hv_bones_raw or not HV_BONE_NAMES:
+        return None
+
+    n_hv = min(len(hv_bones_raw), len(HV_BONE_NAMES))
+
+    # Convert HV world-space bones to model-space by removing entity transform
+    yaw_rad = math.radians(float(entity_yaw))
+    cos_y, sin_y = math.cos(-yaw_rad), math.sin(-yaw_rad)
+    ox, oy, oz = float(entity_pos[0]), float(entity_pos[1]), float(entity_pos[2])
+
+    mt = np.zeros((n_hv, 3), dtype=np.float64)
+    mq = np.zeros((n_hv, 4), dtype=np.float64)
+    mq[:, 3] = 1.0  # identity
+
+    for i in range(n_hv):
+        b_data = hv_bones_raw[i]
+        # world position → entity-local position (undo translation + yaw)
+        wx, wy, wz = b_data[0] - ox, b_data[1] - oy, b_data[2] - oz
+        # undo yaw rotation (rotate by -yaw)
+        lx = wx * cos_y - wy * sin_y
+        ly = wx * sin_y + wy * cos_y
+        lz = wz
+        mt[i] = [lx, ly, lz]
+        # world quaternion → entity-local quaternion (undo yaw)
+        # Entity yaw is a rotation about Z axis
+        # q_inv_yaw = (0, 0, sin(-yaw/2), cos(-yaw/2))
+        half = -yaw_rad / 2.0
+        iq = np.array([0.0, 0.0, math.sin(half), math.cos(half)])
+        bq = np.array([b_data[3], b_data[4], b_data[5], b_data[6]])
+        mq[i] = _skin.qmul(iq, bq)
+
+    # Now run the standard palette join + LBS
+    idx_np = skin["index"].cpu().numpy()
+    wgt_np = skin["weight"].cpu().numpy().astype(np.float64)
+    loc_np = b["loc"].cpu().numpy().astype(np.float64)
+
+    xq, xt, rep = _skin.bone_transforms(
+        skin["palette"],
+        skin["bind_t"].cpu().numpy().astype(np.float64),
+        skin["bind_q"].cpu().numpy().astype(np.float64),
+        HV_BONE_NAMES[:n_hv], mt, mq,
+        palette_ancestors=skin.get("palette_ancestors"),
+        index=idx_np, weight=wgt_np)
+
+    nrm_np = _pm_to_src_axes_np(b["nrm"].cpu().numpy().astype(np.float64))
+    tan_np = _pm_to_src_axes_np(b["tan"].cpu().numpy().astype(np.float64))
+    P, (Nn, Tt) = _skin.lbs(loc_np, idx_np, wgt_np, xq, xt,
+                            dirs=[nrm_np, tan_np])
+
+    dead = (wgt_np.sum(1, keepdims=True) <= 1e-6)
+    P = np.where(dead, loc_np, P)
+    Nn = np.where(dead, nrm_np, Nn)
+    Tt = np.where(dead, tan_np, Tt)
+
+    P = torch.as_tensor(P, device=device)
+    Nn = torch.as_tensor(Nn, device=device)
+    Tt = torch.as_tensor(Tt, device=device)
+
+    return (_pm_to_world_axes(P).to(torch.float32),
+            _pm_to_world_axes(Nn).to(torch.float32),
+            _pm_to_world_axes(Tt).to(torch.float32))
+
+
 def pm_weapon_geom(name, wb, ents, nslots):
     """Per-slot weapon (pos, nrm, tan) in WORLD AXES, or (None, None, None).
 
@@ -92,19 +244,48 @@ def pm_script(ents, tick):
     the TICK delta carried on the row, so the speed it derives is right
     across the gap rather than scaled by it.
     """
+    # HV ground-truth: attach bone data to entities before clip selection
+    hv_frame = _hv_frame_for_tick(tick) if HV_FRAMES else None
     cs = pm_clips()
-    if cs is None:
+    if cs is None and not hv_frame:
         return
     for e in ents:
         key = str(e.get("steamid") if e.get("steamid") is not None
                   else e.get("name") or e.get("team"))
         e.setdefault("tick", tick)
+        # Try HV ground-truth bones first
+        if hv_frame is not None:
+            hv_p = _hv_match_entity(hv_frame, e)
+            if hv_p is not None and hv_p.get("b"):
+                e["_hv_bones"] = hv_p["b"]
+                e["_ev"] = "hv_ground_truth"
+                e["_clip"] = None
+                e["_t"] = 0.0
+                e["_why"] = ["HV ground-truth bones from hypervisor capture"]
+                e["_static"] = False
+                PM_EVENT_COUNT["hv"] = PM_EVENT_COUNT.get("hv", 0) + 1
+                if not HV_NOTE:
+                    HV_NOTE.append(1)
+                    print(f"hv-capture: first HV pose applied at tick {tick}, "
+                          f"{len(hv_p['b'])} bones", flush=True)
+                wnm, whow = pm_weapon_for(e)
+                e["_weapon"], e["_weapon_how"] = wnm, whow
+                continue
+        # Fall back to clip scripter
+        if cs is None:
+            continue
         prev = PM_PREV_ROW.get(key)
         ev, clip, t, why = PM_SCRIPT[0].choose(key, e, prev, cs)
         PM_PREV_ROW[key] = e
         if ev is None:
             e["_anim_why"] = why
             continue
+        wpn_name = e.get("active_weapon_id")
+        if wpn_name and hasattr(cs, '_weapon_tag'):
+            ducking = e.get("duck_button") or e.get("duck_amount", 0) > 0.5
+            better = cs.pick(ev, key=0, weapon=wpn_name, crouch=ducking)
+            if better is not None:
+                clip = better
         if not cs.moves(clip):
             # SAID ON THE LINE IT DRIVES. The event, the clip name and the
             # advancing t are all true here and all of them read as motion;
@@ -138,14 +319,18 @@ def pm_slot_geom(name, b, ents, nslots):
     a slot whose entity has no chosen clip gets None and falls back to the
     bundle's own bind arrays at exactly the site it always used them.
     """
-    if PM_CLIPS[0] is None:
+    if PM_CLIPS[0] is None and not HV_FRAMES:
         return None, None, None
     pos, nrm, tan = [], [], []
     any_posed = False
     for i in range(nslots):
         e = ents[i] if i < len(ents) else None
         got = None
-        if e is not None and e.get("_clip") is not None:
+        if e is not None and e.get("_hv_bones") is not None:
+            got = pm_pose_arrays_hv(
+                name, b, e["_hv_bones"],
+                [e["x"], e["y"], e["z"]], e["yaw"])
+        elif e is not None and e.get("_clip") is not None:
             got = pm_pose_arrays(name, b, e["_clip"], e["_t"])
         if got is None:
             pos.append(None)

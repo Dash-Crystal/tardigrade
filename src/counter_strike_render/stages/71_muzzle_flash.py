@@ -405,11 +405,16 @@ def _vm_sun_dir():
 
 
 def _vm_sun_rgb():
-    return torch.tensor([2.4, 2.25, 2.0], device=device).view(1, 1, 1, 3)
+    # Dust2 light_environment: color=(255,222,189) brightness=2.5
+    # sRGB→linear: (1.0, 0.73, 0.48) × 2.5
+    return torch.tensor([2.5, 1.83, 1.20], device=device).view(1, 1, 1, 3)
 
 
 def _vm_ambient():
-    return torch.tensor([0.30, 0.34, 0.42], device=device).view(1, 1, 1, 3)
+    # Dust2 skyambientbounce: (151,151,151) sRGB→linear ≈ 0.31
+    # skycolor: (211,226,248) sRGB→linear ≈ (0.63, 0.72, 0.93)
+    # Combined ambient = bounce + sky contribution
+    return torch.tensor([0.45, 0.50, 0.60], device=device).view(1, 1, 1, 3)
 
 
 # ======================================================================
@@ -1185,14 +1190,52 @@ class _PMClipSet(_anim.ClipSet):
             clip["_moves"] = v
         return v
 
-    def pick(self, event, key=0):
+    _RIFLE_WEAPONS = frozenset([
+        "AK-47", "M4A1-S", "M4A4", "FAMAS", "Galil AR", "AUG", "SG 553",
+        "AWP", "SSG 08", "SCAR-20", "G3SG1",
+        "MP9", "MAC-10", "MP7", "UMP-45", "P90", "PP-Bizon", "MP5-SD",
+        "Nova", "XM1014", "Sawed-Off", "MAG-7",
+    ])
+    _PISTOL_WEAPONS = frozenset([
+        "Glock-18", "USP-S", "P2000", "Desert Eagle", "Five-SeveN",
+        "Tec-9", "CZ75-Auto", "P250", "Dual Berettas", "R8 Revolver",
+    ])
+
+    @staticmethod
+    def _weapon_tag(weapon_name):
+        if weapon_name is None:
+            return None
+        w = str(weapon_name)
+        if w in _PMClipSet._RIFLE_WEAPONS:
+            return "rifle"
+        if w in _PMClipSet._PISTOL_WEAPONS:
+            return "pistol"
+        if "knife" in w.lower() or "bayonet" in w.lower() or "karambit" in w.lower():
+            return "knife"
+        return None
+
+    def pick(self, event, key=0, weapon=None, crouch=None):
         lst = self.events.get(event) or []
         if not lst:
             return None
-        absolute = [c for c in lst if not c.get("additive")]
+        absolute = [c for c in lst if not c.get("additive")
+                    and "hostage" not in c["clip"].lower()]
         moving = [c for c in absolute if self.moves(c)]
+        tag = self._weapon_tag(weapon)
+        if tag:
+            for pool in (moving, absolute):
+                matched = [c for c in pool if tag in c["clip"].lower()]
+                if matched and crouch is not None:
+                    pref = [c for c in matched
+                            if ("crouch" in c["clip"].lower()) == bool(crouch)]
+                    if pref:
+                        matched = pref
+                if matched:
+                    return matched[int(key) % len(matched)]
         if moving:
             return moving[int(key) % len(moving)]
+        if absolute:
+            return absolute[int(key) % len(absolute)]
         return super().pick(event, key=key)
 
     def census(self):

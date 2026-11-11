@@ -1076,6 +1076,12 @@ parser.add_argument("--playermodel-weapon-map", default=None,
                          "first; an unmapped weapon is NOT drawn and NOT "
                          "substituted with another model, and the entity's "
                          "own line names it.")
+parser.add_argument("--hv-capture", default=None,
+                    help="JSONL from hv_capture_fast.py: ground-truth bone "
+                         "transforms captured via the hypervisor during demo "
+                         "playback. When provided, playermodel poses come "
+                         "from the engine's actual bone output instead of "
+                         "the clip scripter's inference.")
 
 # =======================================================================
 # NON-WORLD SHADER FAMILIES: csgo_character / csgo_eyeball / csgo_customglove

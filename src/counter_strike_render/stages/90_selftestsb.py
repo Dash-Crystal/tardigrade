@@ -360,9 +360,13 @@ warm = min(args.batch, len(rows))
 # is the kind of rule this session has watched fail. WARMING_UP is the one
 # fact the reports need and none of them has to know why.
 WARMING_UP[0] = True
-with stage("startup.warmup_render"):
-    _ = render_window(mvps[:warm], eyes[:warm], FWD[:warm], TIME_S[:warm])
-    torch.cuda.synchronize()
+try:
+    with stage("startup.warmup_render"):
+        _ = render_window(mvps[:warm], eyes[:warm], FWD[:warm], TIME_S[:warm])
+        torch.cuda.synchronize()
+except torch.cuda.OutOfMemoryError:
+    print("WARMUP OOM — skipping (will JIT-compile during first real frame)", flush=True)
+    torch.cuda.empty_cache()
 WARMING_UP[0] = False
 GBUF.clear()      # the warm-up pass would otherwise duplicate every frame
 MATID_DUMP.clear()   # ditto -- and at batch < 48 the duplicates are a
